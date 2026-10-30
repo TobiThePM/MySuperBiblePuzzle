@@ -37,7 +37,10 @@ def load_voice(lid):
         af += f",atempo={TEMPO}"
     raw = subprocess.run(["ffmpeg", "-v", "error", "-i", src, "-af", af, "-ac", "1",
                           "-ar", str(SR), "-f", "s16le", "-"], capture_output=True, check=True).stdout
-    return np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0
+    x = np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0
+    # even out loudness between takes/voices (target ~-18 dBFS RMS, peaks kept under 0.95)
+    x = x * (0.125 / (np.sqrt(np.mean(x ** 2)) + 1e-9))
+    return x / max(1.0, np.max(np.abs(x)) / 0.95)
 
 
 def envelope(x):
@@ -163,7 +166,7 @@ mgain = np.full(N, 0.30, np.float32)
 mgain[: at(INTRO)] = 0.75
 for c in cues:
     a, b = at(c["start"] - 0.1), at(c["start"] + c["dur"] + 0.1)
-    mgain[a:b] = 0.16
+    mgain[a:b] = 0.07
 end_start = cues[-1]["start"]
 mgain[at(end_start):] = np.maximum(mgain[at(end_start):], 0.30)
 mgain[at(end_start + cues[-1]["dur"]):] = 0.7
@@ -175,7 +178,8 @@ music *= mgain * fade
 amb = np.zeros((2, N), np.float32)
 
 noise = rng.standard_normal((2, N)).astype(np.float32)
-rumble = np.stack([band(noise[0], 300, 30), band(noise[1], 300, 30)]) * 1.4
+# keep the rumble low (~30-350 Hz) so it sits under the voices instead of on top of them
+rumble = np.stack([band(noise[0], 1500, 120), band(noise[1], 1500, 120)]) * 3.0
 engine = (0.5 + 0.5 * np.sin(2 * np.pi * 0.7 * tt)) * np.sin(2 * np.pi * 38 * tt) * 0.25
 amb += rumble + engine
 # horns sprinkled through, more in the bridge intro
@@ -193,7 +197,12 @@ for c in cues:
     alev[a:b] = lvl
 alev[at(cues[-1]["start"] - SCENE_GAP):] = 0.0
 alev = smooth(alev, int(0.3 * SR)).astype(np.float32)
-amb *= alev * 0.30
+# duck traffic (and horns) while anyone is talking
+duck = np.ones(N, np.float32)
+for c in cues:
+    duck[at(c["start"] - 0.15):at(c["start"] + c["dur"] + 0.1)] = 0.3
+duck = smooth(duck, int(0.2 * SR)).astype(np.float32)
+amb *= alev * duck * 0.22
 
 # ---------- SFX ----------
 sfx = np.zeros((2, N), np.float32)
@@ -232,14 +241,14 @@ L06, L07 = by_id["L06"], by_id["L07"]
 for fr in (0.36, 0.62):
     add(sfx, L06["start"] + L06["dur"] * fr, ding(990), 0.25)
 for fr in (0.25, 0.52, 0.82):                                               # fact-card stamps
-    add(sfx, L07["start"] + L07["dur"] * fr, thump(), 0.45)
+    add(sfx, L07["start"] + L07["dur"] * fr, thump(), 0.3)
     add(sfx, L07["start"] + L07["dur"] * fr, ding(1480), 0.12)
 L11, L12 = by_id["L11"], by_id["L12"]
-add(sfx, L11["start"] + L11["dur"] * 0.55, ding(1320), 0.3)                # phone ping
-add(sfx, L11["start"] + L11["dur"] * 0.55 + 0.12, ding(1760), 0.3)
+add(sfx, L11["start"] + L11["dur"] * 0.55, ding(1320), 0.14)                # phone ping
+add(sfx, L11["start"] + L11["dur"] * 0.55 + 0.12, ding(1760), 0.14)
 add(sfx, L12["start"] + L12["dur"] * 0.32, band(rng.standard_normal(1200), 4, 1) * adsr(1200, 0.0005, 0.004), 0.8)  # AC click
 n = int(3.2 * SR)                                                           # cold air rush
-add(sfx, L12["start"] + L12["dur"] * 0.33, band(rng.standard_normal(n), 25, 3) * np.minimum(1, np.arange(n) / (0.4 * SR)) * np.exp(-np.arange(n) / (2.0 * SR)), 0.5)
+add(sfx, L12["start"] + L12["dur"] * 0.33, band(rng.standard_normal(n), 25, 3) * np.minimum(1, np.arange(n) / (0.4 * SR)) * np.exp(-np.arange(n) / (2.0 * SR)), 0.2)
 L13 = by_id["L13"]
 for j, fr in enumerate([523.3, 659.3, 784.0, 1046.5]):                      # end sting
     add(sfx, L13["start"] + L13["dur"] + 0.1 + j * 0.09, ding(fr), 0.18)
@@ -250,6 +259,12 @@ for start, x in voices:
     add(dia, start, x, 1.0)
 
 mix = dia * 1.0 + music * 0.55 + amb + sfx * 0.8
+# report how far the voice sits above everything else on each line
+bg = music * 0.55 + amb + sfx * 0.8
+for c in cues:
+    a, b = at(c["start"]), at(c["start"] + c["dur"])
+    r = 20 * np.log10(np.sqrt(np.mean(dia[:, a:b] ** 2)) / (np.sqrt(np.mean(bg[:, a:b] ** 2)) + 1e-9))
+    c["snr_db"] = round(float(r), 1)
 peak = np.max(np.abs(mix)) + 1e-9
 mix = np.tanh(mix / peak * 1.3) * 0.93
 pcm = (mix.T * 32767).astype(np.int16)
@@ -264,4 +279,4 @@ json.dump({"total": round(total, 3), "fps": FPS, "intro": INTRO, "cast": script[
 missing = [c["id"] for c in cues if c["placeholder"]]
 print(f"total {total:.2f}s  lines {len(cues)}  missing {missing}")
 for c in cues:
-    print(f'{c["id"]} {c["start"]:6.2f} +{c["dur"]:.2f} {c["scene"]}')
+    print(f'{c["id"]} {c["start"]:6.2f} +{c["dur"]:.2f} {c["scene"]:8s} voice/bg {c.get("snr_db")} dB')
