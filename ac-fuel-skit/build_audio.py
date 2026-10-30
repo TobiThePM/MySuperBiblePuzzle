@@ -14,7 +14,7 @@ WORK = sys.argv[1] if len(sys.argv) > 1 else HERE
 AUDIO = os.path.join(WORK, "audio")
 SR = 44100
 FPS = 30
-TEMPO = float(os.environ.get("TEMPO", "1.08"))  # speed-up applied to dialogue
+TEMPO = float(os.environ.get("TEMPO", "1.12"))  # speed-up applied to dialogue
 
 INTRO = 2.3   # bridge establishing shot before the first line
 GAP = 0.18    # breath between lines
@@ -30,7 +30,9 @@ def load_voice(lid):
     if not os.path.exists(src):
         return None
     af = ("silenceremove=start_periods=1:start_threshold=-42dB,areverse,"
-          "silenceremove=start_periods=1:start_threshold=-42dB,areverse")
+          "silenceremove=start_periods=1:start_threshold=-42dB,areverse,"
+          # tighten long pauses inside a take (keeps 0.15s of each)
+          "silenceremove=stop_periods=-1:stop_duration=0.25:stop_threshold=-40dB:stop_silence=0.15")
     if TEMPO != 1.0:
         af += f",atempo={TEMPO}"
     raw = subprocess.run(["ffmpeg", "-v", "error", "-i", src, "-af", af, "-ac", "1",

@@ -1,12 +1,12 @@
 # AC Dey Drink Fuel? (Lagos ride-hailing skit)
 
-An animated comedy skit of about 60–70 seconds. It debunks the idea that "AC dey drink fuel": the AC does use some fuel, but only a small amount. It is not an excuse to leave ride-hailing passengers sweating.
+An animated comedy skit (about 72 seconds). It debunks the idea that "AC dey drink fuel": the AC does use some fuel, but only a small amount. It is not an excuse to leave ride-hailing passengers sweating.
 
 ## Output
-- `output/ac-dey-drink-fuel_DRAFT_9x16.mp4`: vertical 1080×1920 for TikTok, Reels, Shorts and Status
-- `output/ac-dey-drink-fuel_DRAFT_16x9.mp4`: landscape 1920×1080 for YouTube, X and Facebook
+- `output/ac-dey-drink-fuel_9x16.mp4`: vertical 1080×1920 for TikTok, Reels, Shorts and Status
+- `output/ac-dey-drink-fuel_16x9.mp4`: landscape 1920×1080 for YouTube, X and Facebook
 
-These are drafts. Only 4 of the 12 lines are voiced so far (L01, L03, L08, L12, from ElevenLabs). The rest show a `[voice pending]` tag and play silently with captions.
+All 12 lines are voiced with ElevenLabs. The takes are in `audio/`.
 
 ## Cast
 | Character | Who | Voice (ElevenLabs) |
@@ -24,9 +24,9 @@ The full script is in `script.json`.
 - At expressway speeds, driving with the windows down adds drag, which also costs fuel.
 
 ## How to rebuild
-1. Put voice takes in `<workdir>/audio/Lxx.mp3`, named by the line ids in `script.json`.
-2. Run `python3 build_audio.py <workdir>`. It trims silence, lays out the timeline, synthesizes the music, ambience and SFX, and writes `timeline.json` and `mix.wav`.
-3. Run `node render.js <workdir> 1080 1920 out_9x16.mp4` and `node render.js <workdir> 1920 1080 out_16x9.mp4`.
+1. Put voice takes in `audio/Lxx.mp3`, named by the line ids in `script.json`.
+2. Run `python3 build_audio.py`. It trims silence, lays out the timeline, synthesizes the music, ambience and SFX, and writes `timeline.json` and `mix.wav`.
+3. Run `node render.js $PWD 1080 1920 out_9x16.mp4` and `node render.js $PWD 1920 1080 out_16x9.mp4`.
 
 Visuals are drawn in code (`scene.html`, canvas). Mouths are lip-synced to each voice track's loudness. Requires ffmpeg, numpy and Playwright with Chromium.
 
