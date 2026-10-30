@@ -1,0 +1,98 @@
+{
+  "title": "AC Dey Drink Fuel?",
+  "cast": {
+    "ada": {
+      "name": "ADA",
+      "role": "Passenger",
+      "voice": "Rho (ElevenLabs)",
+      "color": "#ff9f1c"
+    },
+    "kunle": {
+      "name": "KUNLE",
+      "role": "Ride-hailing driver",
+      "voice": "Terna Gabriel (ElevenLabs)",
+      "color": "#2ec4b6"
+    },
+    "baba": {
+      "name": "BABA MECHANIC",
+      "role": "The voice of reason",
+      "voice": "Chris D Razor (ElevenLabs)",
+      "color": "#ffd23f"
+    }
+  },
+  "lines": [
+    {
+      "id": "L01",
+      "who": "ada",
+      "scene": "car",
+      "text": "Oga driver, abeg on the AC! This Lagos sun dey fry me like plantain!"
+    },
+    {
+      "id": "L02",
+      "who": "kunle",
+      "scene": "car",
+      "text": "AC?! Ahn ahn, madam! You wan finish my fuel? This AC dey drink fuel pass generator!"
+    },
+    {
+      "id": "L03",
+      "who": "ada",
+      "scene": "car",
+      "text": "Generator? Oga, na small car you dey drive, no be I-better-pass-my-neighbour!"
+    },
+    {
+      "id": "L04",
+      "who": "kunle",
+      "scene": "car",
+      "text": "AC dey spoil engine! Open window. Na natural AC, free of charge!"
+    },
+    {
+      "id": "L05",
+      "who": "baba",
+      "scene": "carBaba",
+      "text": "My pikin. Come, make I show you something."
+    },
+    {
+      "id": "L06",
+      "who": "baba",
+      "scene": "engine",
+      "text": "Same belt dey turn your alternator and your AC compressor. AC off? E dey spin free. AC on? Small load. Like one extra passenger."
+    },
+    {
+      "id": "L07",
+      "who": "baba",
+      "scene": "facts",
+      "text": "So yes, AC dey use fuel. But small! Five to ten percent. For go-slow, maybe four to seven hundred naira per hour. No be tanker!"
+    },
+    {
+      "id": "L08",
+      "who": "baba",
+      "scene": "window",
+      "text": "And that your open window for expressway? The breeze dey drag your motor back. Fuel still dey go!"
+    },
+    {
+      "id": "L09",
+      "who": "kunle",
+      "scene": "carBaba",
+      "text": "But Baba... fuel don reach thirteen hundred naira o!"
+    },
+    {
+      "id": "L11",
+      "who": "ada",
+      "scene": "rate",
+      "text": "Oga, no wahala. I go just rate you when I land."
+    },
+    {
+      "id": "L12",
+      "who": "kunle",
+      "scene": "acOn",
+      "text": "Ahn ahn! Madam, wait! See as e cold now! AC na investment!"
+    },
+    {
+      "id": "L13",
+      "who": "baba",
+      "scene": "end",
+      "text": "AC no be your problem. Fuel go finish anyhow, na five stars dey refill tank. On the AC!"
+    }
+  ],
+  "facts_note": "AC typically adds ~5-10% fuel use in normal driving (more in heavy heat/stop-go) and ~0.3-0.5 L/hour extra when idling. At ~N1,369/L (NNPC Lagos, late Oct 2026) that is roughly N400-N700 per hour of go-slow. Estimates; varies by car, AC condition and weather."
+}
