@@ -1,0 +1,839 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Full Tank Skit</title>
+<style>
+  @font-face { font-family: 'Bangers'; src: url('fonts/bangers-latin-400-normal.woff2') format('woff2'); }
+  @font-face { font-family: 'Baloo'; font-weight: 800; src: url('fonts/baloo-2-latin-800-normal.woff2') format('woff2'); }
+  @font-face { font-family: 'Baloo'; font-weight: 500; src: url('fonts/baloo-2-latin-500-normal.woff2') format('woff2'); }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Deterministic frame renderer: window.renderFrame(t) draws the skit at time t (seconds).
+const Q = new URLSearchParams(location.search);
+const W = +Q.get('w') || 1080, H = +Q.get('h') || 1920;
+const PORTRAIT = H > W;
+const cv = document.getElementById('c');
+cv.width = W; cv.height = H;
+const ctx = cv.getContext('2d');
+let TL = null;                      // timeline.json, injected by the renderer
+window.setTimeline = (tl) => { TL = tl; };
+
+// ---------- layout: a 1000x1000 "core" stage plus a caption band ----------
+const S = PORTRAIT ? W / 1000 : (H * 0.8) / 1000;
+const OX = (W - 1000 * S) / 2;
+const OY = PORTRAIT ? 290 : 0;
+const VIS = { x0: -OX / S, x1: (W - OX) / S, y0: -OY / S, y1: (H - OY) / S };
+const CAP_Y = PORTRAIT ? OY + 1000 * S + 40 : 1000 * S + 18;   // top of caption band (screen px)
+
+const INK = '#1d1a1a';
+const FONT_T = "'Bangers', 'DejaVu Sans', sans-serif";
+const FONT_B = "'Baloo', 'DejaVu Sans', sans-serif";
+let BOIL = 0;
+const rnd = (n) => { const x = Math.sin(n * 12.9898 + BOIL * 78.233) * 43758.5453; return (x - Math.floor(x)) * 2 - 1; };
+const srnd = (n) => { const x = Math.sin(n * 91.345 + 3.1) * 15731.743; return x - Math.floor(x); }; // static
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const ease = (k) => 1 - Math.pow(1 - clamp(k), 3);
+const back = (k) => { k = clamp(k); const c = 2.2; return 1 + (c + 1) * Math.pow(k - 1, 3) + c * Math.pow(k - 1, 2); };
+const lerp = (a, b, k) => a + (b - a) * k;
+
+// ---------- doodle primitives ----------
+function blob(x, y, rx, ry, fill, seed = 0, lw = 5, wob = 1) {
+  ctx.beginPath();
+  const N = 30;
+  for (let i = 0; i <= N; i++) {
+    const a = (i % N) / N * Math.PI * 2, r = 1 + 0.016 * wob * rnd(seed + (i % N));
+    const px = x + Math.cos(a) * rx * r, py = y + Math.sin(a) * ry * r;
+    i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+  }
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (lw) { ctx.lineWidth = lw; ctx.strokeStyle = INK; ctx.lineJoin = 'round'; ctx.stroke(); }
+}
+function poly(pts, fill, seed = 0, lw = 5, closed = true, jit = 1.6) {
+  ctx.beginPath();
+  pts.forEach(([x, y], i) => {
+    const px = x + rnd(seed + i * 2) * jit, py = y + rnd(seed + i * 2 + 1) * jit;
+    i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+  });
+  if (closed) ctx.closePath();
+  if (fill && closed) { ctx.fillStyle = fill; ctx.fill(); }
+  if (lw) { ctx.lineWidth = lw; ctx.strokeStyle = INK; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke(); }
+}
+function rrect(x, y, w, h, r, fill, seed = 0, lw = 5) {
+  ctx.save();
+  ctx.translate(rnd(seed) * 1.2, rnd(seed + 1) * 1.2);
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, r);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (lw) { ctx.lineWidth = lw; ctx.strokeStyle = INK; ctx.stroke(); }
+  ctx.restore();
+}
+function line(x1, y1, x2, y2, lw = 5, col = INK, seed = 0) {
+  ctx.beginPath();
+  ctx.moveTo(x1 + rnd(seed) * 1.2, y1 + rnd(seed + 1) * 1.2);
+  ctx.quadraticCurveTo((x1 + x2) / 2 + rnd(seed + 2) * 2.5, (y1 + y2) / 2 + rnd(seed + 3) * 2.5, x2, y2);
+  ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.lineCap = 'round'; ctx.stroke();
+}
+function text(str, x, y, size, col, opts = {}) {
+  ctx.save();
+  ctx.font = `${opts.weight || ''} ${size}px ${opts.font || FONT_T}`;
+  ctx.textAlign = opts.align || 'center'; ctx.textBaseline = 'middle';
+  if (opts.rot) { ctx.translate(x, y); ctx.rotate(opts.rot); x = 0; y = 0; }
+  if (opts.stroke) { ctx.lineWidth = opts.stroke; ctx.strokeStyle = opts.strokeCol || INK; ctx.lineJoin = 'round'; ctx.strokeText(str, x, y); }
+  ctx.fillStyle = col; ctx.fillText(str, x, y);
+  ctx.restore();
+}
+function star(x, y, r, fill, lw = 4) {
+  const pts = [];
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r; pts.push([x + Math.cos(a) * rr, y + Math.sin(a) * rr]); }
+  poly(pts, fill, x, lw, true, 0.8);
+}
+function drop(x, y, s, col = '#7fd3ff') {
+  ctx.beginPath();
+  ctx.moveTo(x, y - 14 * s);
+  ctx.quadraticCurveTo(x + 10 * s, y, x, y + 8 * s);
+  ctx.quadraticCurveTo(x - 10 * s, y, x, y - 14 * s);
+  ctx.fillStyle = col; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = INK; ctx.stroke();
+}
+function snowflake(x, y, r, rot) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = r * 0.18; ctx.lineCap = 'round';
+  for (let i = 0; i < 6; i++) {
+    ctx.rotate(Math.PI / 3);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -r);
+    ctx.moveTo(0, -r * 0.6); ctx.lineTo(r * 0.25, -r * 0.8);
+    ctx.moveTo(0, -r * 0.6); ctx.lineTo(-r * 0.25, -r * 0.8); ctx.stroke();
+  }
+  ctx.restore();
+}
+// comic sticker that pops in at `age` seconds
+function sticker(str, x, y, age, opts = {}) {
+  if (age < 0) return;
+  const k = back(age / 0.35), size = opts.size || 54;
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate((opts.rot || 0) + Math.sin(age * 3) * 0.015); ctx.scale(k, k);
+  ctx.font = `${size}px ${FONT_T}`;
+  const w = ctx.measureText(str).width + size * 0.8, h = size * 1.35;
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.roundRect(-w / 2 + 8, -h / 2 + 10, w, h, 14); ctx.fill();
+  rrect(-w / 2, -h / 2, w, h, 14, opts.bg || '#ffd23f', 7, 6);
+  text(str, 0, 3, size, opts.fg || INK);
+  ctx.restore();
+}
+
+// ---------- characters ----------
+const SKIN_K = '#6d3f22', SKIN_A = '#8a5434', SKIN_B = '#4e2d1a';
+function mouthShape(x, y, w, open, smile = 0) {
+  if (open < 0.06) {
+    ctx.beginPath(); ctx.moveTo(x - w / 2, y); ctx.quadraticCurveTo(x, y + 8 + smile * 10, x + w / 2, y);
+    ctx.lineWidth = 5; ctx.strokeStyle = INK; ctx.lineCap = 'round'; ctx.stroke(); return;
+  }
+  const h = 6 + open * 30;
+  blob(x, y + h * 0.3, w / 2 * (0.75 + open * 0.35), h / 2, '#3a0d0d', 99, 4, 0.5);
+  ctx.save(); ctx.beginPath(); ctx.ellipse(x, y + h * 0.3, w / 2 * 0.8, h / 2 * 0.85, 0, 0, Math.PI * 2); ctx.clip();
+  ctx.fillStyle = '#f4f1ea'; ctx.fillRect(x - w, y + h * 0.3 - h / 2, w * 2, Math.min(7, h * 0.28));
+  if (open > 0.35) { ctx.fillStyle = '#e8737a'; ctx.beginPath(); ctx.ellipse(x, y + h * 0.3 + h * 0.32, w * 0.25, h * 0.22, 0, 0, Math.PI * 2); ctx.fill(); }
+  ctx.restore();
+}
+function eyes(x, y, gap, st, lash = false) {
+  const kind = st.eye || 'normal', lx = (st.look || 0) * 6;
+  for (const sx of [-1, 1]) {
+    const ex = x + sx * gap;
+    if (kind === 'closed' || kind === 'happy') {
+      ctx.beginPath();
+      if (kind === 'happy') { ctx.arc(ex, y + 4, 12, Math.PI * 1.1, Math.PI * 1.9); }
+      else { ctx.moveTo(ex - 12, y); ctx.quadraticCurveTo(ex, y + 8, ex + 12, y); }
+      ctx.lineWidth = 5; ctx.strokeStyle = INK; ctx.lineCap = 'round'; ctx.stroke();
+      continue;
+    }
+    const ry = kind === 'wide' ? 19 : 14;
+    blob(ex, y, 14, ry, '#ffffff', sx * 7, 4, 0.6);
+    blob(ex + lx, y + 2, kind === 'wide' ? 5 : 6.5, kind === 'wide' ? 5 : 7, INK, sx * 9, 0);
+    if (lash) { line(ex + sx * 8, y - ry + 2, ex + sx * 16, y - ry - 6, 3.5); line(ex + sx * 2, y - ry, ex + sx * 6, y - ry - 9, 3.5); }
+  }
+}
+function brows(x, y, gap, kind, col = INK, lw = 7) {
+  const d = { flat: [0, 0], up: [-10, -10], angry: [8, -6], worried: [-8, 8], smug: [-6, 2] }[kind || 'flat'];
+  for (const sx of [-1, 1]) {
+    const inner = d[0], outer = d[1];
+    line(x + sx * (gap - 14), y + inner * (sx === -1 ? 1 : 1) * 0 + (kind === 'angry' ? 8 : kind === 'worried' ? -8 : 0),
+         x + sx * (gap + 14), y + (kind === 'angry' ? -4 : kind === 'worried' ? 6 : 0) + (kind === 'up' ? -10 : 0), lw, col, sx * 3);
+  }
+}
+function sweat(x, y, t, n = 3, s = 1) {
+  for (let i = 0; i < n; i++) {
+    const k = ((t * 0.9 + i / n) % 1);
+    drop(x + (i - 1) * 18 * s + Math.sin(i * 7) * 6, y + k * 70 * s, s * (1 - k * 0.4), '#9fe3ff');
+  }
+}
+function drawKunle(cx, cy, sc, st, t) {
+  ctx.save(); ctx.translate(cx, cy); ctx.scale(sc, sc); ctx.rotate(st.tilt || 0);
+  // torso (green polo) + seatbelt
+  poly([[-120, 95], [120, 95], [150, 360], [-150, 360]], '#2f9e6b', 11);
+  poly([[-26, 95], [26, 95], [0, 150]], '#f4f1ea', 12, 4);
+  poly([[60, 95], [92, 95], [-95, 360], [-130, 360]], '#3b3f46', 13, 4);
+  rrect(-28, 60, 56, 50, 10, SKIN_K, 14, 4);
+  // head
+  blob(-68, 8, 14, 20, SKIN_K, 15); blob(68, 8, 14, 20, SKIN_K, 16);
+  blob(0, 0, 68, 82, SKIN_K, 17);
+  // cap
+  ctx.beginPath(); ctx.ellipse(0, -30, 70, 58, 0, Math.PI, 0); ctx.closePath();
+  ctx.fillStyle = '#d7263d'; ctx.fill(); ctx.lineWidth = 5; ctx.strokeStyle = INK; ctx.stroke();
+  poly([[-74, -32], [74, -32], [98, -16], [-98, -16]], '#1d1a1a', 18, 4);
+  blob(0, -86, 9, 6, '#1d1a1a', 19, 0);
+  text('K', 0, -58, 34, '#ffffff');
+  eyes(0, -2, 27, st);
+  brows(0, -26, 27, st.brow, INK, 7);
+  ctx.beginPath(); ctx.moveTo(-4, 6); ctx.quadraticCurveTo(-12, 24, 2, 26); ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
+  // moustache
+  poly([[-30, 36], [-4, 30], [0, 33], [4, 30], [30, 36], [22, 42], [0, 38], [-22, 42]], '#1d1a1a', 20, 0, true, 1);
+  mouthShape(0, 50, 34, st.mouth || 0, st.smile || 0);
+  if (st.sweat) sweat(-50, -40, t, 3, 1);
+  ctx.restore();
+}
+function drawAda(cx, cy, sc, st, t) {
+  ctx.save(); ctx.translate(cx, cy); ctx.scale(sc, sc);
+  const wind = st.wind || 0;
+  // braids behind
+  for (let i = 0; i < 12; i++) {
+    const sx = i < 6 ? -1 : 1, j = i % 6;
+    const bx = sx * (40 + j * 7), sway = Math.sin(t * 9 + i) * 10 * wind + wind * 25 * sx;
+    ctx.beginPath(); ctx.moveTo(bx * 0.6, -40); ctx.quadraticCurveTo(bx * 1.25 + sway * 0.5, 60, bx * 1.1 + sway, 170 + j * 6);
+    ctx.lineWidth = 11; ctx.strokeStyle = '#231815'; ctx.lineCap = 'round'; ctx.stroke();
+    ctx.lineWidth = 3; ctx.strokeStyle = '#4b3a33'; ctx.stroke();
+  }
+  // ankara top
+  poly([[-105, 92], [105, 92], [135, 340], [-135, 340]], '#f26a1b', 31);
+  ctx.save(); ctx.beginPath(); ctx.moveTo(-105, 92); ctx.lineTo(105, 92); ctx.lineTo(135, 340); ctx.lineTo(-135, 340); ctx.clip();
+  for (let gx = -140; gx < 140; gx += 44) for (let gy = 100; gy < 340; gy += 44) {
+    const o = ((gy / 44) % 2) * 22;
+    ctx.beginPath(); ctx.arc(gx + o, gy, 12, 0, 7); ctx.fillStyle = '#ffd23f'; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = '#1b5e5a'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(gx + o, gy, 4, 0, 7); ctx.fillStyle = '#1b5e5a'; ctx.fill();
+  }
+  ctx.restore();
+  rrect(-24, 58, 48, 46, 10, SKIN_A, 32, 4);
+  blob(0, 0, 62, 76, SKIN_A, 33);
+  // hair line + bun of braids
+  ctx.beginPath(); ctx.ellipse(0, -36, 64, 46, 0, Math.PI * 1.02, Math.PI * 1.98); ctx.lineTo(48, -30); ctx.quadraticCurveTo(0, -56, -48, -30); ctx.closePath();
+  ctx.fillStyle = '#231815'; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
+  blob(0, -92, 30, 22, '#231815', 34, 4);
+  rrect(-58, -58, 116, 16, 8, '#2ec4b6', 35, 3);
+  // earrings
+  for (const sx of [-1, 1]) { ctx.beginPath(); ctx.arc(sx * 62, 34, 13, 0, 7); ctx.lineWidth = 5; ctx.strokeStyle = '#f2b705'; ctx.stroke(); }
+  eyes(0, -4, 25, st, true);
+  brows(0, -26, 25, st.brow, INK, 5);
+  ctx.beginPath(); ctx.moveTo(-3, 4); ctx.quadraticCurveTo(-10, 20, 3, 22); ctx.lineWidth = 3.5; ctx.strokeStyle = INK; ctx.stroke();
+  ctx.save(); ctx.globalAlpha = 1;
+  mouthShape(0, 42, 30, st.mouth || 0, st.smile || 0);
+  ctx.restore();
+  if (st.sweat) sweat(46, -44, t + 0.3, 3, 0.9);
+  // hand fan (raffia) waving when hot
+  if (st.fan) {
+    const a = Math.sin(t * 14) * 0.45;
+    ctx.save(); ctx.translate(-118, 40); ctx.rotate(a - 0.3);
+    line(0, 0, 0, 60, 9, '#8d5a2b');
+    blob(0, -50, 52, 56, '#e0b16a', 36, 5);
+    for (let r = 14; r < 52; r += 12) { ctx.beginPath(); ctx.ellipse(0, -50, r, r * 1.07, 0, 0, 7); ctx.lineWidth = 2.5; ctx.strokeStyle = '#a8742f'; ctx.stroke(); }
+    blob(0, -50, 12, 12, '#c0392b', 37, 3);
+    ctx.restore();
+    blob(-118, 70, 18, 16, SKIN_A, 38, 4);
+  }
+  ctx.restore();
+}
+function drawBaba(cx, cy, sc, st, t) {
+  ctx.save(); ctx.translate(cx, cy); ctx.scale(sc, sc); ctx.rotate(st.tilt || 0);
+  // overalls
+  poly([[-125, 95], [125, 95], [155, 380], [-155, 380]], '#2b5ea7', 51);
+  poly([[-40, 95], [40, 95], [30, 150], [-30, 150]], '#f4f1ea', 52, 4);
+  rrect(-60, 170, 120, 90, 10, '#24508f', 53, 4);
+  blob(-80, 210, 14, 10, '#1d2a3a', 54, 0); blob(70, 290, 18, 11, '#1d2a3a', 55, 0); blob(20, 320, 10, 8, '#1d2a3a', 56, 0);
+  poly([[30, 175], [52, 160], [62, 200], [40, 205]], '#d7263d', 57, 3);
+  rrect(-28, 60, 56, 50, 10, SKIN_B, 58, 4);
+  blob(-70, 10, 14, 20, SKIN_B, 59); blob(70, 10, 14, 20, SKIN_B, 60);
+  blob(0, 0, 70, 80, SKIN_B, 61);
+  // bald shine + grey side hair
+  ctx.beginPath(); ctx.ellipse(-22, -52, 18, 9, -0.4, 0, 7); ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fill();
+  blob(-62, -20, 14, 22, '#cfcfcf', 62, 3); blob(62, -20, 14, 22, '#cfcfcf', 63, 3);
+  // beard
+  ctx.beginPath(); ctx.moveTo(-62, 18); ctx.quadraticCurveTo(-60, 108, 0, 112); ctx.quadraticCurveTo(60, 108, 62, 18);
+  ctx.quadraticCurveTo(30, 40, 0, 34); ctx.quadraticCurveTo(-30, 40, -62, 18);
+  ctx.fillStyle = '#e9e9e9'; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
+  eyes(0, -6, 27, st);
+  brows(0, -32, 27, st.brow, '#efefef', 11);
+  ctx.beginPath(); ctx.moveTo(-5, 2); ctx.quadraticCurveTo(-14, 22, 3, 24); ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
+  // reading glasses on nose
+  ctx.lineWidth = 3.5; ctx.strokeStyle = INK;
+  for (const sx of [-1, 1]) { ctx.beginPath(); ctx.arc(sx * 27, -4, 19, 0, 7); ctx.stroke(); }
+  ctx.beginPath(); ctx.moveTo(-8, -6); ctx.lineTo(8, -6); ctx.stroke();
+  mouthShape(0, 56, 30, st.mouth || 0, st.smile || 0);
+  // arm with spanner pointing up
+  if (st.point) {
+    const a = st.point;
+    ctx.save(); ctx.translate(120, 130); ctx.rotate(-0.9 + Math.sin(t * 6) * 0.08 * a);
+    rrect(-20, -150, 40, 160, 18, '#2b5ea7', 64, 5);
+    blob(0, -165, 26, 24, SKIN_B, 65);
+    // spanner
+    ctx.save(); ctx.translate(0, -175); ctx.rotate(0.3);
+    rrect(-8, -110, 16, 110, 6, '#b8c0c8', 66, 4);
+    blob(0, -118, 22, 20, '#b8c0c8', 67, 4);
+    ctx.fillStyle = st.bg || '#2b5ea7'; ctx.fillRect(-7, -142, 14, 22);
+    ctx.restore();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// ---------- backgrounds ----------
+function sky(top, bot) {
+  const g = ctx.createLinearGradient(0, VIS.y0, 0, 520);
+  g.addColorStop(0, top); g.addColorStop(1, bot);
+  ctx.fillStyle = g; ctx.fillRect(VIS.x0, VIS.y0, VIS.x1 - VIS.x0, VIS.y1 - VIS.y0);
+}
+function sun(x, y, r, t) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(t * 0.3);
+  for (let i = 0; i < 12; i++) { ctx.rotate(Math.PI / 6); poly([[-12, r + 14], [12, r + 14], [0, r + 60 + Math.sin(t * 4 + i) * 10]], '#ffcf33', 70 + i, 4); }
+  ctx.restore();
+  blob(x, y, r, r, '#ffdd55', 80, 6);
+  // grumpy sun face
+  for (const sx of [-1, 1]) { blob(x + sx * 26, y - 6, 7, 10, INK, 81 + sx, 0); line(x + sx * 14, y - 30, x + sx * 40, y - 24 + (sx > 0 ? -6 : -6), 5); }
+  ctx.beginPath(); ctx.arc(x, y + 34, 22, Math.PI * 1.15, Math.PI * 1.85); ctx.lineWidth = 5; ctx.strokeStyle = INK; ctx.stroke();
+}
+function skyline(y) {
+  ctx.fillStyle = '#c98fb0';
+  for (let x = Math.floor(VIS.x0 / 70) * 70, i = 0; x < VIS.x1 + 70; x += 70, i++) {
+    const h = 60 + srnd(i) * 150, w = 50 + srnd(i + 50) * 30;
+    ctx.fillRect(x, y - h, w, h);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    for (let wy = y - h + 12; wy < y - 10; wy += 22) for (let wx = x + 8; wx < x + w - 8; wx += 16) ctx.fillRect(wx, wy, 7, 10);
+    ctx.fillStyle = '#c98fb0';
+  }
+}
+function heatShimmer(y0, y1, t, alpha = 0.25) {
+  ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 4;
+  for (let i = 0; i < 9; i++) {
+    const x = VIS.x0 + ((i * 173 + t * 40) % (VIS.x1 - VIS.x0)), y = y0 + srnd(i) * (y1 - y0);
+    ctx.beginPath();
+    for (let k = 0; k <= 60; k += 6) ctx.lineTo(x + Math.sin(k / 8 + t * 6 + i) * 6, y - k);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+function danfo(x, y, s, seed, t) {
+  ctx.save(); ctx.translate(x, y + Math.sin(t * 7 + seed) * 1.5); ctx.scale(s, s);
+  rrect(-150, -140, 300, 140, 22, '#ffc914', seed, 6);
+  ctx.fillStyle = INK; ctx.fillRect(-150, -60, 300, 12); ctx.fillRect(-150, -36, 300, 8);
+  for (let i = 0; i < 4; i++) rrect(-136 + i * 70, -126, 58, 50, 8, '#9fd6f0', seed + i, 4);
+  blob(-90, 0, 30, 30, '#2d2d2d', seed + 9); blob(90, 0, 30, 30, '#2d2d2d', seed + 10);
+  blob(-90, 0, 11, 11, '#9a9a9a', seed + 11, 3); blob(90, 0, 11, 11, '#9a9a9a', seed + 12, 3);
+  ctx.restore();
+}
+function keke(x, y, s, seed, t) {
+  ctx.save(); ctx.translate(x, y + Math.sin(t * 9 + seed) * 2); ctx.scale(s, s);
+  poly([[-70, -10], [-60, -110], [40, -120], [80, -60], [80, -10]], '#ffc914', seed, 6);
+  poly([[-50, -100], [30, -108], [60, -64], [-50, -60]], '#9fd6f0', seed + 3, 4);
+  ctx.fillStyle = '#2f9e6b'; ctx.fillRect(-70, -30, 150, 12);
+  blob(-45, 0, 22, 22, '#2d2d2d', seed + 5); blob(60, 0, 22, 22, '#2d2d2d', seed + 6);
+  ctx.restore();
+}
+function sedan(x, y, s, col, seed, t, opts = {}) {
+  ctx.save(); ctx.translate(x, y + Math.sin(t * 8 + seed) * 1.2); ctx.scale(s, s);
+  if (opts.flip) ctx.scale(-1, 1);
+  poly([[-170, -10], [-170, -60], [-110, -70], [-60, -125], [70, -125], [120, -70], [175, -60], [175, -10]], col, seed, 6);
+  poly([[-48, -112], [0, -112], [0, -72], [-92, -72]], opts.windowDown ? 'rgba(0,0,0,0)' : '#9fd6f0', seed + 2, 4);
+  poly([[12, -112], [62, -112], [104, -72], [12, -72]], '#9fd6f0', seed + 3, 4);
+  if (opts.rideSign) { rrect(-30, -150, 60, 24, 6, '#2f9e6b', seed + 4, 4); text('RIDE', 0, -137, 18, '#fff'); }
+  blob(-105, -6, 32, 32, '#2d2d2d', seed + 5); blob(110, -6, 32, 32, '#2d2d2d', seed + 6);
+  ctx.save(); ctx.translate(-105, -6); ctx.rotate(opts.spin || 0); blob(0, 0, 13, 13, '#b8b8b8', seed + 7, 3); ctx.fillStyle = INK; ctx.fillRect(-2, -13, 4, 26); ctx.restore();
+  ctx.save(); ctx.translate(110, -6); ctx.rotate(opts.spin || 0); blob(0, 0, 13, 13, '#b8b8b8', seed + 8, 3); ctx.fillStyle = INK; ctx.fillRect(-2, -13, 4, 26); ctx.restore();
+  blob(165, -45, 8, 8, '#ffe066', seed + 9, 3);
+  ctx.restore();
+}
+
+// ---------- scenes ----------
+
+
+// chalkboard for the explainer scenes
+function chalkboard() {
+  ctx.fillStyle = '#7b4a26'; ctx.fillRect(VIS.x0, VIS.y0, VIS.x1 - VIS.x0, VIS.y1 - VIS.y0);
+  for (let y = VIS.y0; y < VIS.y1; y += 46) { ctx.fillStyle = 'rgba(0,0,0,0.08)'; ctx.fillRect(VIS.x0, y, VIS.x1 - VIS.x0, 4); }
+  const x0 = Math.max(VIS.x0 + 30, -360), x1 = Math.min(VIS.x1 - 30, 1360);
+  const y0 = Math.max(VIS.y0 + 30, -200), y1 = Math.min(VIS.y1 - 30, 1200);
+  rrect(x0, y0, x1 - x0, y1 - y0, 20, '#1f4d3a', 200, 10);
+  ctx.save(); ctx.globalAlpha = 0.06; ctx.fillStyle = '#fff';
+  for (let i = 0; i < 40; i++) ctx.fillRect(x0 + srnd(i) * (x1 - x0), y0 + srnd(i + 9) * (y1 - y0), 120 * srnd(i + 3), 6);
+  ctx.restore();
+}
+const CHALK = '#f4f1ea';
+function chalkText(str, x, y, size, col = CHALK, age = 1, opts = {}) {
+  if (age < 0) return;
+  ctx.save(); ctx.globalAlpha = clamp(age / 0.25);
+  text(str, x, y, size, col, opts);
+  ctx.restore();
+}
+function gauge(x, y, r, val, label) {
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x, y, r, Math.PI, 0); ctx.closePath();
+  ctx.fillStyle = '#f4f1ea'; ctx.fill(); ctx.lineWidth = 7; ctx.strokeStyle = INK; ctx.stroke();
+  for (let i = 0; i <= 8; i++) { const a = Math.PI + i / 8 * Math.PI; line(x + Math.cos(a) * r * 0.82, y + Math.sin(a) * r * 0.82, x + Math.cos(a) * r * 0.95, y + Math.sin(a) * r * 0.95, i % 4 ? 4 : 7, INK, i); }
+  text('E', x - r * 0.68, y - 28, 44, '#d7263d'); text('F', x + r * 0.68, y - 28, 44, '#2f9e6b');
+  const a = Math.PI + val * Math.PI;
+  line(x, y, x + Math.cos(a) * r * 0.78, y + Math.sin(a) * r * 0.78, 9, '#d7263d', 300);
+  blob(x, y, 16, 16, INK, 301, 0);
+  ctx.restore();
+  if (label) text(label, x, y + 46, 34, CHALK, { font: FONT_B, weight: 800 });
+}
+
+// ---------- skit 2 characters: Dayo (tops up) and Tobi (fills up) ----------
+function drawMan(cx, cy, sc, st, t, look) {
+  ctx.save(); ctx.translate(cx, cy); ctx.scale(sc, sc); ctx.rotate(st.tilt || 0);
+  const skin = look.skin;
+  poly([[-118, 95], [118, 95], [148, 380], [-148, 380]], look.shirt, look.seed);
+  if (look.trim) { ctx.fillStyle = look.trim; ctx.fillRect(-10, 100, 20, 260); poly([[-40, 95], [40, 95], [0, 140]], look.trim, look.seed + 1, 4); }
+  else poly([[-34, 95], [34, 95], [0, 130]], skin, look.seed + 1, 4);
+  rrect(-28, 60, 56, 50, 10, skin, look.seed + 2, 4);
+  blob(-68, 8, 14, 20, skin, look.seed + 3); blob(68, 8, 14, 20, skin, look.seed + 4);
+  blob(0, 0, 66, 80, skin, look.seed + 5);
+  // hair: short top, optional fade + sunglasses parked on head
+  ctx.beginPath(); ctx.ellipse(0, -38, 64, 44, 0, Math.PI * 1.02, Math.PI * 1.98); ctx.closePath();
+  ctx.fillStyle = '#1a1412'; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
+  if (look.shades) {
+    rrect(-52, -66, 46, 24, 10, '#1d1a1a', look.seed + 6, 3); rrect(6, -66, 46, 24, 10, '#1d1a1a', look.seed + 7, 3);
+    line(-6, -56, 6, -56, 4); ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.fillRect(-44, -62, 10, 6); ctx.fillRect(14, -62, 10, 6);
+  }
+  eyes(0, -4, 26, st);
+  brows(0, -28, 26, st.brow, INK, 7);
+  ctx.beginPath(); ctx.moveTo(-4, 4); ctx.quadraticCurveTo(-12, 22, 2, 24); ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
+  if (look.beard) { ctx.save(); ctx.globalAlpha = 0.85; blob(0, 58, 34, 20, '#1a1412', look.seed + 8, 0); ctx.restore(); }
+  mouthShape(0, 48, 32, st.mouth || 0, st.smile || 0);
+  if (st.sweat) sweat(-46, -40, t, 3, 1);
+  if (st.scratch) { // hand scratching head (confused)
+    const a = Math.sin(t * 10) * 6;
+    blob(-70 + a, -70, 24, 22, skin, look.seed + 9);
+    rrect(-112, -60, 40, 150, 18, look.shirt, look.seed + 10, 5);
+  }
+  ctx.restore();
+}
+const DAYO = { skin: '#7a4a2b', shirt: '#5b6ee1', seed: 600, beard: false };
+const TOBI = { skin: '#5f3a20', shirt: '#f4f1ea', trim: '#d4a017', seed: 700, beard: true, shades: true };
+
+// ---------- filling station ----------
+function canopy() {
+  sky('#7cc6ff', '#dff1ff');
+  sun(860, 90, 50, 0);
+  skyline(470);
+  ctx.fillStyle = '#c9c4bb'; ctx.fillRect(VIS.x0, 470, VIS.x1 - VIS.x0, VIS.y1 - 470);
+  ctx.fillStyle = 'rgba(0,0,0,0.08)';
+  for (let x = Math.floor(VIS.x0 / 120) * 120; x < VIS.x1; x += 120) ctx.fillRect(x, 470, 4, VIS.y1 - 470);
+  // canopy roof + pillars (red and white like a typical Lagos station)
+  rrect(VIS.x0 - 20, 120, VIS.x1 - VIS.x0 + 40, 90, 0, '#d7263d', 800, 6);
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(VIS.x0, 168, VIS.x1 - VIS.x0, 16);
+  text('FUEL  •  OIL  •  GAS', 500, 150, 36, '#ffffff');
+  for (const px of [60, 940, -300, 1300]) if (px > VIS.x0 - 60 && px < VIS.x1 + 60) rrect(px - 18, 210, 36, 400, 6, '#e8e8e8', 801 + px, 5);
+  // price board on the side
+  const bx = PORTRAIT ? 860 : 1180;
+  rrect(bx - 80, 240, 160, 150, 12, '#1d1a1a', 805, 5);
+  text('PMS', bx, 272, 30, '#ffd23f');
+  text('₦1,369', bx, 322, 40, '#7dff7a');
+  text('per litre', bx, 362, 20, '#cfcfcf', { font: FONT_B, weight: 800 });
+}
+function pumpDisplay(x, y, w, naira, litres, active, seed) {
+  rrect(x - w / 2, y, w, 120, 10, '#1f2a24', seed, 5);
+  ctx.save(); ctx.font = `34px ${FONT_T}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = active ? '#7dff7a' : '#3f6b3c';
+  ctx.fillText('₦' + Math.round(naira).toLocaleString('en-US'), x, y + 38);
+  ctx.font = `28px ${FONT_T}`; ctx.fillText(litres.toFixed(1) + ' L', x, y + 86);
+  ctx.restore();
+}
+function fuelPump(t, o) {
+  rrect(340, 400, 320, 620, 24, '#f4f1ea', 820, 6);
+  rrect(340, 400, 320, 70, 24, '#d7263d', 821, 6);
+  text('PUMP 3', 500, 436, 34, '#ffffff');
+  pumpDisplay(420, 500, 140, o.dayoN, o.dayoN / 1369, o.dayoActive, 822);
+  pumpDisplay(580, 500, 140, o.tobiN, o.tobiN / 1369, o.tobiActive, 823);
+  text('DAYO', 420, 640, 22, '#555', { font: FONT_B, weight: 800 });
+  text('TOBI', 580, 640, 22, '#555', { font: FONT_B, weight: 800 });
+  // hoses
+  ctx.lineWidth = 12; ctx.strokeStyle = INK; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(350, 700); ctx.quadraticCurveTo(250, 820, 300, 900); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(650, 700); ctx.quadraticCurveTo(750, 820, 700, 900); ctx.stroke();
+}
+function smallCar(x, y, s, col, seed) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  rrect(-170, -150, 340, 160, 40, col, seed, 6);
+  rrect(-130, -130, 260, 60, 14, '#9fd6f0', seed + 1, 4);
+  blob(-120, 10, 30, 30, '#2d2d2d', seed + 2); blob(120, 10, 30, 30, '#2d2d2d', seed + 3);
+  blob(-150, -40, 14, 10, '#ffe066', seed + 4, 3); blob(150, -40, 14, 10, '#ffe066', seed + 5, 3);
+  ctx.restore();
+}
+function sceneStation(t, o) {
+  canopy();
+  smallCar(170, 760, 0.95, '#e46b3a', 830);   // Dayo's small car
+  smallCar(830, 760, 1.15, '#2b2f36', 840);   // Tobi's big jeep
+  // queue in the background (landscape shows more)
+  danfo(-260 + Math.sin(t * 0.3) * 6, 620, 0.6, 850, t); danfo(1300, 620, 0.6, 851, t);
+  if (o.babaRise > 0) drawBaba(500, lerp(560, 300, ease(o.babaRise)), 0.85, o.babaSt, t);
+  fuelPump(t, o);
+  drawMan(185, 560, 0.92, o.dayoSt, t, DAYO);
+  drawMan(815, 560, 0.92, o.tobiSt, t, TOBI);
+}
+
+// ---------- explainer boards ----------
+function tankCutaway(x, y, w, h, level, opts = {}) {
+  rrect(x, y, w, h, 40, '#d9dde2', opts.seed || 900, 6);
+  ctx.save(); ctx.beginPath(); ctx.roundRect(x + 6, y + 6, w - 12, h - 12, 34); ctx.clip();
+  const fy = y + h - (h - 12) * level;
+  ctx.fillStyle = opts.col || '#f2b705'; ctx.fillRect(x, fy, w, h);
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 4;
+  ctx.beginPath(); for (let k = 0; k <= w; k += 10) ctx.lineTo(x + k, fy + Math.sin(k / 18 + (opts.t || 0) * 4) * 4); ctx.stroke();
+  ctx.restore();
+  rrect(x, y, w, h, 40, null, (opts.seed || 900) + 1, 6);
+  return fy;
+}
+function check(x, y, s = 1, col = '#7dff7a') {
+  ctx.beginPath(); ctx.moveTo(x - 14 * s, y); ctx.lineTo(x - 4 * s, y + 12 * s); ctx.lineTo(x + 18 * s, y - 14 * s);
+  ctx.lineWidth = 8 * s; ctx.strokeStyle = col; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke();
+}
+function sceneMyth(t, p, lt, cue) {
+  // Tobi's imagination: dreamy purple cloud board
+  ctx.fillStyle = '#6c4fb3'; ctx.fillRect(VIS.x0, VIS.y0, VIS.x1 - VIS.x0, VIS.y1 - VIS.y0);
+  for (let i = 0; i < 14; i++) blob(VIS.x0 + srnd(i) * (VIS.x1 - VIS.x0), VIS.y0 + srnd(i + 5) * (VIS.y1 - VIS.y0), 90, 60, 'rgba(255,255,255,0.08)', 910 + i, 0);
+  sticker('TOBI SCIENCE CLASS', 500, 90, lt, { size: 50, bg: '#ffffff', rot: -0.03 });
+  const age = (f) => (p - f) * cue.dur;
+  // full tank (left) vs half tank (right)
+  tankCutaway(110, 260, 330, 260, 0.95, { t, seed: 920 });
+  text('FULL', 275, 560, 44, '#ffffff');
+  const fy = tankCutaway(560, 260, 330, 260, 0.45, { t, seed: 930 });
+  text('HALF', 725, 560, 44, '#ffffff');
+  if (p > 0.25) {
+    text('AIR SPACE', 725, 320, 34, '#ffffff', { stroke: 5 });
+    // "fuel drying off" squiggles in the air gap (Tobi's theory)
+    ctx.save(); ctx.globalAlpha = clamp(age(0.3) / 0.4);
+    for (let i = 0; i < 5; i++) {
+      const k = (t * 0.8 + i / 5) % 1, x0 = 610 + i * 55;
+      ctx.beginPath(); for (let s = 0; s <= 8; s++) ctx.lineTo(x0 + Math.sin(s + t * 5 + i) * 8, fy - 10 - s * 10 * k * 1.6);
+      ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.stroke();
+    }
+    ctx.restore();
+  }
+  if (p > 0.45) sticker('"FUEL DEY DRY OFF"', 725, 680, age(0.45), { size: 42, rot: 0.04, bg: '#ffd23f' });
+  if (p > 0.6) sticker('"FULL TANK = E DEY LAST"', 275, 680, age(0.6), { size: 40, rot: -0.04, bg: '#ffd23f' });
+  drawMan(PORTRAIT ? 500 : 1180, PORTRAIT ? 900 : 560, PORTRAIT ? 0.55 : 0.8, { mouth: cue.mouth, brow: 'smug', smile: 1 }, t, TOBI);
+  if (p > 0.85) {
+    const a = age(0.85), k = back(a / 0.3);
+    ctx.save(); ctx.translate(500, 420); ctx.rotate(-0.15); ctx.scale(k * 1.0, k * 1.0); ctx.globalAlpha = 0.92;
+    rrect(-200, -70, 400, 140, 18, null, 940, 12);
+    ctx.strokeStyle = '#ff3b3b'; ctx.lineWidth = 12; ctx.strokeRect(-200, -70, 400, 140);
+    text('MYTH?', 0, 6, 110, '#ff3b3b');
+    ctx.restore();
+  }
+}
+function sceneLitres(t, p, lt, cue) {
+  chalkboard();
+  chalkText('SMALL FUEL = SMALL DISTANCE', 500, 70, 52, CHALK, lt);
+  const age = (f) => (p - f) * cue.dur;
+  // jerrycan filling up to ~7 L
+  const fill = clamp(age(0.05) / 1.2);
+  rrect(130, 230, 220, 280, 26, '#d7263d', 950, 6);
+  rrect(250, 190, 70, 50, 10, '#d7263d', 951, 5);
+  ctx.save(); ctx.beginPath(); ctx.roundRect(142, 242, 196, 256, 18); ctx.clip();
+  ctx.fillStyle = '#f2b705'; ctx.fillRect(130, 498 - 256 * 0.6 * fill, 220, 300); ctx.restore();
+  text('~7 L', 240, 560, 52, '#ffd23f');
+  chalkText('₦10,000', 640, 260, 72, '#ffffff', age(0.1));
+  chalkText('at ₦1,369 per litre', 640, 330, 40, CHALK, age(0.2), { font: FONT_B, weight: 800 });
+  chalkText('≈ 7.3 litres', 640, 400, 64, '#ffd23f', age(0.3));
+  // road with car: ~60-90 km in Lagos traffic
+  if (p > 0.55) {
+    const a = age(0.55), k = clamp(a / 1.2);
+    ctx.strokeStyle = CHALK; ctx.lineWidth = 6; ctx.setLineDash([24, 18]);
+    ctx.beginPath(); ctx.moveTo(120, 760); ctx.lineTo(880, 760); ctx.stroke(); ctx.setLineDash([]);
+    sedan(lerp(150, 700, k), 740, 0.5, '#e46b3a', 960, t, { spin: t * 10 });
+    line(880, 760, 880, 660, 6, CHALK); poly([[880, 660], [940, 680], [880, 700]], '#d7263d', 961, 4);
+    chalkText('≈ 60–90 km (Lagos traffic)', 500, 840, 40, '#ffe9a8', a - 0.3, { font: FONT_B, weight: 800 });
+  }
+}
+function sceneGauge(t, p, lt, cue) {
+  chalkboard();
+  chalkText('YOUR GAUGE DEY PLAY YOU', 500, 70, 54, CHALK, lt);
+  // real fuel drains steadily; the needle sticks at F, then dives
+  const real = 1 - clamp((p - 0.1) / 0.85);
+  const needle = real > 0.7 ? 1 : real < 0.15 ? real * 0.8 : 0.12 + (real - 0.15) / 0.55 * 0.88;
+  gauge(PORTRAIT ? 500 : 640, 470, 230, needle, 'What the gauge shows');
+  const bx = PORTRAIT ? 500 : 180, by = PORTRAIT ? 600 : 230;
+  if (PORTRAIT) {
+    rrect(160, by, 680, 70, 16, '#d9dde2', 970, 5);
+    ctx.fillStyle = '#f2b705'; ctx.fillRect(166, by + 6, 668 * real, 58);
+    text('Real fuel inside tank', 500, by + 105, 32, CHALK, { font: FONT_B, weight: 800 });
+  } else {
+    rrect(bx - 50, by, 100, 420, 16, '#d9dde2', 970, 5);
+    ctx.fillStyle = '#f2b705'; ctx.fillRect(bx - 44, by + 414 - 408 * real, 88, 408 * real);
+    text('Real fuel', bx, by + 460, 32, CHALK, { font: FONT_B, weight: 800 });
+  }
+  if (p > 0.25 && real > 0.6) sticker('STILL "FULL"?!', PORTRAIT ? 500 : 640, 175, (p - 0.25) * cue.dur, { size: 50, bg: '#ffffff', rot: -0.04 });
+  if (real < 0.5) sticker('NOW E DEY FALL QUICK!', PORTRAIT ? 500 : 640, 175, (p - 0.58) * cue.dur, { size: 46, bg: '#ff6b35', fg: '#fff', rot: 0.04 });
+  chalkText('Gauge no be straight ruler', 500, PORTRAIT ? 860 : 900, 40, '#ffe9a8', (p - 0.7) * cue.dur, { font: FONT_B, weight: 800 });
+}
+function scenePump(t, p, lt, cue) {
+  chalkboard();
+  chalkText('WETIN FULL TANK REALLY DEY DO', 500, 70, 48, CHALK, lt);
+  const age = (f) => (p - f) * cue.dur;
+  // benefits list
+  const items = [['FEWER TRIPS TO STATION', 0.12], ['LESS QUEUE, LESS WAHALA', 0.28], ['FUEL PUMP STAY COOL', 0.45]];
+  items.forEach(([s, f], i) => {
+    if (p < f) return;
+    const y = 170 + i * 70;
+    ctx.save(); ctx.globalAlpha = clamp(age(f) / 0.25);
+    check(150, y, 1.2); text(s, 190, y, 40, CHALK, { align: 'left' });
+    ctx.restore();
+  });
+  // tank with the electric fuel pump sitting inside, cooled by fuel
+  const level = p < 0.55 ? 0.8 : lerp(0.8, 0.08, clamp((p - 0.55) / 0.3));
+  const fy = tankCutaway(220, 420, 560, 330, level, { t, seed: 980 });
+  const hot = clamp((p - 0.75) / 0.12);
+  const px = 500, py = 690;
+  rrect(px - 40, py - 120, 80, 150, 16, hot > 0 ? `rgb(${200 + 55 * hot},${200 - 120 * hot},${200 - 150 * hot})` : '#b8c0c8', 981, 5);
+  text('PUMP', px, py - 45, 26, INK);
+  line(px, py - 120, px, 410, 8, INK); text('to engine', px + 70, 400, 24, CHALK, { font: FONT_B, weight: 800 });
+  if (hot > 0) {
+    for (let i = 0; i < 3; i++) { const k = (t * 1.5 + i / 3) % 1; ctx.save(); ctx.globalAlpha = (1 - k) * hot; line(px - 30 + i * 30, py - 130 - k * 60, px - 30 + i * 30 + Math.sin(t * 8 + i) * 8, py - 160 - k * 60, 5, '#ff6b35', 990 + i); ctx.restore(); }
+    sticker('RESERVE = PUMP DEY HOT!', 500, 820, age(0.8), { size: 44, bg: '#ff3b3b', fg: '#fff', rot: -0.03 });
+  } else if (p > 0.45) {
+    chalkText('fuel around pump = cooling', 500, 820, 34, '#ffe9a8', age(0.45), { font: FONT_B, weight: 800 });
+  }
+  if (p > 0.9) chalkText('Keep am above 1/4 tank', 500, 900, 40, '#7dff7a', age(0.9), { font: FONT_B, weight: 800 });
+}
+function sceneMeter(t, p, lt, cue) {
+  // close-up of the pump display
+  ctx.fillStyle = '#d7263d'; ctx.fillRect(VIS.x0, VIS.y0, VIS.x1 - VIS.x0, VIS.y1 - VIS.y0);
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  for (let i = -20; i < 40; i++) ctx.fillRect(VIS.x0 + i * 80, VIS.y0, 30, VIS.y1 - VIS.y0);
+  sticker('BUY FROM STATION WEY YOU TRUST', 500, 110, lt, { size: 46, bg: '#ffffff', rot: -0.02 });
+  rrect(160, 220, 680, 470, 30, '#f4f1ea', 1000, 8);
+  rrect(210, 270, 580, 370, 18, '#1f2a24', 1001, 6);
+  const blink = Math.floor(t * 3) % 2 ? 1 : 0.55;
+  ctx.save(); ctx.globalAlpha = blink;
+  text('₦0.00', 500, 380, 110, '#7dff7a'); text('0.00 L', 500, 520, 80, '#7dff7a');
+  ctx.restore();
+  if (p > 0.5) {
+    const a = (p - 0.5) * cue.dur, k = back(a / 0.35);
+    ctx.save(); ctx.translate(760, 640); ctx.scale(k, k);
+    blob(0, 0, 70, 70, '#2f9e6b', 1002, 6); check(0, 4, 2.4, '#ffffff');
+    ctx.restore();
+    sticker('CHECK: METER START FROM ZERO', 500, 800, a - 0.2, { size: 44, bg: '#ffd23f', rot: 0.02 });
+  }
+}
+function sceneEnd2(t, p, lt, cue) {
+  ctx.fillStyle = '#ffc914'; ctx.fillRect(VIS.x0, VIS.y0, VIS.x1 - VIS.x0, VIS.y1 - VIS.y0);
+  ctx.save(); ctx.translate(500, 420); ctx.rotate(t * 0.15); ctx.globalAlpha = 0.18;
+  for (let i = 0; i < 16; i++) { ctx.rotate(Math.PI / 8); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-60, -1400); ctx.lineTo(60, -1400); ctx.fill(); }
+  ctx.restore();
+  const age = (f) => (p - f) * cue.dur;
+  sticker('FULL TANK NO BE MAGIC...', 500, 160, age(0.2), { size: 62, bg: '#ffffff', rot: -0.03 });
+  if (p > 0.6) {
+    const a = age(0.6), k = back(a / 0.4);
+    ctx.save(); ctx.translate(500, 320); ctx.scale(k, k); ctx.rotate(0.03 + Math.sin(t * 5) * 0.02);
+    rrect(-300, -75, 600, 150, 26, '#2f9e6b', 1010, 8);
+    text('NA PLANNING!', 0, 4, 96, '#ffffff', { stroke: 6 });
+    ctx.restore();
+  }
+  const bob = (i) => Math.sin(t * 5 + i) * 6;
+  drawMan(200, 700 + bob(0), 0.62, { mouth: 0, eye: 'happy', smile: 1, brow: 'up' }, t, DAYO);
+  drawMan(800, 700 + bob(1), 0.62, { mouth: 0, eye: 'happy', smile: 1, brow: 'up' }, t, TOBI);
+  drawBaba(500, 660 + bob(2), 0.72, { mouth: cue.mouth, brow: 'flat', smile: 1, point: p > 0.6 ? 1 : 0, bg: '#ffc914' }, t);
+  const after = lt - cue.dur;
+  if (after > 0) {
+    ctx.save(); ctx.globalAlpha = clamp(after / 0.4);
+    const fy = PORTRAIT ? 1060 : 1050;
+    rrect(30, fy - 46, 940, 112, 14, 'rgba(255,255,255,0.94)', 1020, 4);
+    text('Tank level does not change how fast the engine burns fuel.', 500, fy - 18, 25, INK, { font: FONT_B, weight: 800 });
+    text('Filling up saves trips & protects the in-tank pump. ₦10k ≈ 7.3 L at ₦1,369/L', 500, fy + 14, 23, '#444', { font: FONT_B, weight: 800 });
+    text('(Lagos, Oct 2026). Estimates — your car may vary.', 500, fy + 42, 23, '#444', { font: FONT_B, weight: 800 });
+    ctx.restore();
+  }
+}
+
+// ---------- direction ----------
+const SET = { station: 'station', stationBaba: 'station', myth: 'myth', litres: 'board', gauge: 'board', pump: 'board', meter: 'meter', end: 'end' };
+function envAt(c, t) { const i = Math.floor((t - c.start) * TL.fps); return (i >= 0 && i < c.env.length) ? c.env[i] : 0; }
+function cueAt(t) { let cur = null; for (const c of TL.cues) if (t >= c.start - 0.25) cur = c; return cur; }
+function byId(id) { return TL.cues.find(c => c.id === id); }
+function direct(t) {
+  const c = cueAt(t);
+  if (!c) return { kind: 'intro' };
+  const lt = t - c.start, p = clamp(lt / c.dur);
+  const talking = (who) => (c.who === who && lt >= 0 && lt <= c.dur) ? envAt(c, t) : 0;
+  return { kind: SET[c.scene], c, lt, p, talking };
+}
+function renderStation(t, d) {
+  const c = d.c, talking = d ? d.talking : () => 0;
+  const F01 = byId('F01'), F02 = byId('F02');
+  const pumpStart = F01.start + F01.dur * 0.62;
+  const dayoN = clamp((t - pumpStart) / 3.0) * 10000;
+  const tobiN = clamp((t - (F02.start + 0.5)) / 14) * 62000;
+  const o = {
+    dayoN, tobiN, dayoActive: t > pumpStart, tobiActive: t > F02.start,
+    babaRise: 0,
+    dayoSt: { mouth: c ? talking('dayo') : 0, brow: 'worried', look: 1 },
+    tobiSt: { mouth: c ? talking('tobi') : 0, brow: 'flat', smile: 1, look: -1 },
+    babaSt: { mouth: c ? talking('baba') : 0, brow: 'flat', point: 0, bg: '#c9c4bb' },
+  };
+  const id = c ? c.id : null, lt = d.lt || 0;
+  if (id === 'F01') { o.dayoSt.eye = 'normal'; o.dayoSt.look = 0; }
+  if (id === 'F02') { o.tobiSt.brow = 'smug'; o.dayoSt.brow = 'angry'; }
+  if (id === 'F03') { o.dayoSt.brow = 'worried'; o.dayoSt.sweat = true; o.dayoSt.tilt = Math.sin(lt * 5) * 0.04; }
+  if (c && c.scene === 'stationBaba') {
+    o.babaRise = clamp((t - (c.start - 0.25)) / 0.45);
+    o.dayoSt.look = 1; o.tobiSt.look = -1;
+    if (id === 'F05') { o.tobiSt = { mouth: 0, eye: 'wide', brow: 'up', look: -1 }; o.babaSt.point = 1; }
+    if (id === 'F08') { o.dayoSt = { mouth: talking('dayo'), brow: 'worried', look: 1, scratch: true }; o.babaRise = 1; }
+    if (id === 'F11') { o.tobiSt = { mouth: talking('tobi'), brow: 'worried', smile: 1, look: -1, tilt: -0.05 }; o.babaSt.smile = 1; o.babaRise = 1; }
+  }
+  sceneStation(t, o);
+  const age = (f) => c ? t - (c.start + c.dur * f) : -1;
+  const dy = PORTRAIT ? 0 : 60;
+  if (id === 'F01') sticker('ECONOMY NO DEY SMILE', 500, 250 + dy, age(0.55), { size: 46, rot: -0.04, bg: '#ffffff' });
+  if (id === 'F02') sticker('"I FILL AM ONCE!"', 760, 260 + dy, age(0.55), { size: 46, rot: 0.05 });
+  if (id === 'F03') sticker('TANK GET HOLE?!', 230, 260 + dy, age(0.4), { size: 48, rot: -0.05, bg: '#ff6b35', fg: '#fff' });
+  if (id === 'F05') {
+    sticker('BABA MECHANIC', 500, 150 + dy, age(-0.02), { size: 44, rot: 0.03 });
+    sticker('TANK DEY SEALED: FUEL NO DEY DRY', 500, 250 + dy, age(0.25), { size: 38, bg: '#ffffff', rot: -0.03 });
+    sticker('ENGINE DEY BURN AM: SAME SPEED, FULL OR HALF', 500, 330 + dy, age(0.6), { size: 32, bg: '#8fd3ff', rot: 0.02 });
+  }
+  if (id === 'F08') sticker('?!', 240, 300 + dy, age(0.3), { size: 70, bg: '#ffffff' });
+  if (id === 'F11') sticker('RIGHT ANSWER, WRONG REASON', 500, 250 + dy, age(0.45), { size: 42, rot: -0.03, bg: '#ffffff' });
+}
+function sceneIntro(t) {
+  renderStation(t, { c: null, lt: 0, talking: () => 0 });
+  sticker('LAGOS FILLING STATION', 500, 250 + (PORTRAIT ? 0 : 60), t - 0.3, { size: 54, rot: -0.04 });
+}
+
+
+
+
+function renderFrame(t) {
+  BOIL = Math.floor(t * 8);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const d = direct(t);
+  // camera: slight handheld drift + punch-in on scene change
+  const c = d.c;
+  let since = c ? t - (c.start - 0.25) : t;
+  // find how long the current *set* has been on screen
+  if (c) {
+    const idx = TL.cues.indexOf(c);
+    let j = idx; while (j > 0 && SET[TL.cues[j - 1].scene] === SET[c.scene]) j--;
+    since = t - (TL.cues[j].start - 0.25);
+  }
+  const punch = 1 + 0.12 * (1 - ease(since / 0.35));
+  const zoom = (c && (c.id === 'F05' || c.id === 'F03') && d.lt > 0) ? 1 + 0.05 * ease(d.lt / 0.4) : 1;
+  const setZoom = (!PORTRAIT && (d.kind === 'station' || d.kind === 'intro')) ? 1.15 : 1;
+  const z = punch * zoom * setZoom;
+  const fx = (c && c.id === 'F03') ? 200 : 500, fy = 560;
+  ctx.setTransform(S, 0, 0, S, OX, OY);
+  ctx.translate(fx, fy); ctx.scale(z, z); ctx.translate(-fx, -fy);
+  ctx.translate(Math.sin(t * 0.9) * 4, Math.cos(t * 1.3) * 3);
+
+  const cue = c ? Object.assign({}, c, { mouth: d.talking(c.who) }) : null;
+  if (d.kind === 'intro') sceneIntro(t);
+  else if (d.kind === 'station') renderStation(t, d);
+  else if (d.kind === 'myth') sceneMyth(t, d.p, d.lt, cue);
+  else if (d.kind === 'board') ({ litres: sceneLitres, gauge: sceneGauge, pump: scenePump })[c.scene](t, d.p, d.lt, cue);
+  else if (d.kind === 'meter') sceneMeter(t, d.p, d.lt, cue);
+  else if (d.kind === 'end') sceneEnd2(t, d.p, d.lt, cue);
+
+  // white flash on set change
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (since < 0.12 && c) { ctx.fillStyle = `rgba(255,255,255,${0.6 * (1 - since / 0.12)})`; ctx.fillRect(0, 0, W, H); }
+  overlay(t, d);
+  // fade in / out
+  const fade = Math.min(clamp(t / 0.4), clamp((TL.total - t) / 0.6));
+  if (fade < 1) { ctx.fillStyle = `rgba(0,0,0,${1 - fade})`; ctx.fillRect(0, 0, W, H); }
+}
+
+// ---------- overlay: title banner + captions (screen space) ----------
+function wrap(str, maxW, font) {
+  ctx.font = font;
+  const words = str.split(' '), lines = [];
+  let cur = [];
+  for (const w of words) {
+    const test = cur.concat(w).join(' ');
+    if (ctx.measureText(test).width > maxW && cur.length) { lines.push(cur); cur = [w]; } else cur.push(w);
+  }
+  if (cur.length) lines.push(cur);
+  return lines;
+}
+function overlay(t, d) {
+  // title banner (portrait: top band; landscape: corner badge)
+  if (!d.c || d.kind !== 'end') {
+    if (PORTRAIT) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(29,26,26,0.0)';
+      const k = back(clamp((t - 0.1) / 0.4));
+      ctx.translate(W / 2, 150); ctx.scale(k, k); ctx.rotate(-0.025);
+      ctx.fillStyle = '#ffd23f'; ctx.strokeStyle = INK; ctx.lineWidth = 8;
+      ctx.beginPath(); ctx.roundRect(-430, -95, 860, 190, 26); ctx.fill(); ctx.stroke();
+      text('FULL TANK DEY BURN SLOW?', 0, -18, 92, INK);
+      text('BABA MECHANIC EXPLAINS  •  EP. 2', 0, 58, 40, '#d7263d', { font: FONT_B, weight: 800 });
+      ctx.restore();
+    } else {
+      ctx.save(); ctx.translate(40, 34);
+      ctx.fillStyle = '#ffd23f'; ctx.strokeStyle = INK; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.roundRect(0, 0, 520, 78, 16); ctx.fill(); ctx.stroke();
+      text('FULL TANK DEY BURN SLOW?', 260, 42, 50, INK);
+      ctx.restore();
+    }
+  }
+  const c = d.c;
+  if (!c || d.lt < -0.05 || d.lt > c.dur + 0.15) return;
+  const cast = TL.cast[c.who];
+  const size = PORTRAIT ? 54 : 44;
+  const font = `800 ${size}px ${FONT_B}`;
+  const maxW = PORTRAIT ? W - 120 : W * 0.78;
+  const lines = wrap(c.text, maxW, font);
+  const lh = size * 1.18;
+  const boxH = lines.length * lh + 40 + size * 0.9;
+  const top = PORTRAIT ? CAP_Y : Math.min(CAP_Y, H - boxH - 22);
+  const nWords = c.text.split(' ').length;
+  const spoken = clamp(d.lt / (c.dur * 0.95)) * nWords;
+  ctx.save();
+  ctx.fillStyle = 'rgba(16,14,14,0.82)';
+  ctx.beginPath(); ctx.roundRect(W / 2 - maxW / 2 - 30, top, maxW + 60, boxH, 22); ctx.fill();
+  // speaker tag
+  ctx.font = `${size * 0.72}px ${FONT_T}`;
+  const tw = ctx.measureText(cast.name).width + 36;
+  ctx.fillStyle = cast.color; ctx.beginPath(); ctx.roundRect(W / 2 - maxW / 2 - 10, top - size * 0.45, tw, size * 0.9, 12); ctx.fill();
+  ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
+  ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText(cast.name, W / 2 - maxW / 2 + 8, top + 2);
+  if (c.placeholder) {
+    ctx.font = `800 ${size * 0.5}px ${FONT_B}`; ctx.fillStyle = '#ff8080';
+    ctx.fillText('[voice pending]', W / 2 - maxW / 2 + tw + 6, top + 2);
+  }
+  // words, highlighted as they are spoken
+  ctx.font = font; ctx.textBaseline = 'middle';
+  let wi = 0;
+  lines.forEach((ws, li) => {
+    const full = ws.join(' ');
+    let x = W / 2 - ctx.measureText(full).width / 2;
+    const y = top + 30 + size * 0.5 + li * lh + 8;
+    ws.forEach((w) => {
+      const on = wi < spoken;
+      ctx.fillStyle = on ? '#ffffff' : 'rgba(255,255,255,0.45)';
+      if (on && wi > spoken - 1.2) ctx.fillStyle = cast.color;
+      ctx.fillText(w, x, y);
+      x += ctx.measureText(w + ' ').width;
+      wi++;
+    });
+  });
+  ctx.restore();
+}
+
+window.renderFrame = renderFrame;
+window.ready = document.fonts.ready.then(() => Promise.all([
+  document.fonts.load(`64px ${FONT_T}`), document.fonts.load(`800 40px ${FONT_B}`), document.fonts.load(`500 40px ${FONT_B}`)]));
+</script>
+</body>
+</html>

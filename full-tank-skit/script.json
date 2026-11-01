@@ -1,0 +1,23 @@
+{
+  "title": "Full Tank Dey Burn Slow?",
+  "cast": {
+    "dayo": { "name": "DAYO", "role": "Tops up N10k at a time", "voice": "Timmy Adubi (ElevenLabs)", "color": "#ff9f1c" },
+    "tobi": { "name": "TOBI", "role": "Fills the tank (for the wrong reason)", "voice": "Kingsley (ElevenLabs)", "color": "#2ec4b6" },
+    "baba": { "name": "BABA MECHANIC", "role": "The voice of reason", "voice": "Chris D Razor (ElevenLabs)", "color": "#ffd23f" }
+  },
+  "lines": [
+    { "id": "F01", "who": "dayo", "scene": "station",     "text": "Abeg, ten thousand. Just ten. Economy no dey smile." },
+    { "id": "F02", "who": "tobi", "scene": "station",     "text": "Dayo! Every two days you dey here. Me, I fill my tank once, e last me one week!" },
+    { "id": "F03", "who": "dayo", "scene": "station",     "text": "Na wetin I no understand o! My fuel dey run like say tank get hole." },
+    { "id": "F04", "who": "tobi", "scene": "myth",        "text": "Na science! When tank full, air no get space inside, so fuel no dey dry off. E dey last!" },
+    { "id": "F05", "who": "baba", "scene": "stationBaba", "text": "Tobi, sit down! Tank dey close tight, fuel no dey dry. Na engine dey burn am. Same speed, full or half!" },
+    { "id": "F06", "who": "baba", "scene": "litres",      "text": "Ten thousand na like seven litres. Small fuel, small distance!" },
+    { "id": "F07", "who": "baba", "scene": "gauge",       "text": "Your gauge too dey play you. E hold Full long time, then fall quick-quick for bottom." },
+    { "id": "F08", "who": "dayo", "scene": "stationBaba", "text": "So full tank no dey save fuel?" },
+    { "id": "F09", "who": "baba", "scene": "pump",        "text": "E no go make fuel burn slow. But e save you trips and queue. And your fuel pump dey sit inside fuel to cool. No dey run am for reserve!" },
+    { "id": "F10", "who": "baba", "scene": "meter",       "text": "And buy from station wey you trust. Check say meter start from zero!" },
+    { "id": "F11", "who": "tobi", "scene": "stationBaba", "text": "So I correct, but for wrong reason?" },
+    { "id": "F12", "who": "baba", "scene": "end",         "text": "Na so! Full tank no be magic. Na planning!" }
+  ],
+  "facts_note": "The engine burns fuel at a rate set by driving and engine load, not tank level; a full tank is ~30-40 kg heavier (marginally worse, negligible). N10,000 at ~N1,369/L (NNPC Lagos, late Oct 2026) is ~7.3 L, roughly 60-90 km in city traffic. Fuel gauges are non-linear near Full/Empty. In-tank electric fuel pumps are cooled by surrounding fuel; habitually running near empty can shorten pump life and pull in sediment. Real benefits of filling up: fewer trips/queues, pump protection, buffer during scarcity."
+}
