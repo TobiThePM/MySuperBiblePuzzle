@@ -1,0 +1,28 @@
+{
+  "title": "Tyre Don Burst!",
+  "cast": {
+    "femi":  { "name": "FEMI",          "role": "Driver enjoying his life", "voice": "Will (ElevenLabs)",   "color": "#ff9f1c" },
+    "ngozi": { "name": "OFFICER NGOZI", "role": "Road safety officer (FRSC-inspired cartoon)", "voice": "Amanda (ElevenLabs)", "color": "#c6ff3d" }
+  },
+  "lines": [
+    { "id": "T01", "who": "femi",  "scene": "drive",    "text": "Oshodi, no go-slow today?! Ah, God don butter my bread!" },
+    { "id": "T02", "who": "femi",  "scene": "drive",    "text": "Sixty kilometre, AC cold, music sweet... today na my day o!" },
+    { "id": "T03", "who": "femi",  "scene": "burst",    "pre": 1.6, "text": "Jesus! Wetin be that?! Na my village people?!" },
+    { "id": "T04", "who": "ngozi", "scene": "officer",  "text": "Oga, calm down! Na your tyre burst. Na that panic dey cause accident." },
+    { "id": "T05", "who": "femi",  "scene": "officer",  "text": "Ah! FRSC?! Where you come from?!" },
+    { "id": "T06", "who": "ngozi", "scene": "step1",    "text": "Leave that one. Oga, hold your steering with two hands. Keep am straight. No slam brake o!" },
+    { "id": "T07", "who": "ngozi", "scene": "step2",    "text": "Two: comot leg for accelerator small-small. Make the motor slow down by itself." },
+    { "id": "T08", "who": "ngozi", "scene": "step3",    "text": "Three: on your hazard light, make everybody know say wahala dey." },
+    { "id": "T09", "who": "ngozi", "scene": "step4",    "text": "Four: when you don slow, enter side gently. Park far from the road." },
+    { "id": "T10", "who": "femi",  "scene": "parked",   "text": "Na me go change the tyre?" },
+    { "id": "T11", "who": "ngozi", "scene": "roadside", "text": "If you sabi and the place safe, use your spare. If not, call vulcanizer. And no stand near the road!" },
+    { "id": "T12", "who": "ngozi", "scene": "night",    "text": "For night, some boys dey throw nail and stone for road. Use your full light when road empty, but dim am when motor dey come." },
+    { "id": "T13", "who": "ngozi", "scene": "nightRoute", "text": "If tyre burst for dark place, no stop there. Drive slowly reach filling station or bright place. Rim cheap pass your life!" },
+    { "id": "T14", "who": "femi",  "scene": "chat",     "text": "Officer, wetin I suppose carry for my boot?" },
+    { "id": "T15", "who": "ngozi", "scene": "chat",     "text": "Spare tyre, jack, C-caution, fire extinguisher. And check your tyre pressure every week." },
+    { "id": "T16", "who": "femi",  "scene": "chat",     "text": "Officer, thank you! Abeg, you no go collect anything?" },
+    { "id": "T17", "who": "ngozi", "scene": "chat",     "text": "Collect wetin? Just drive safe!" }
+  ],
+  "end_card": "Tyre wey burst no be the real problem. Na when your panic make you do wrong thing.",
+  "facts_note": "Tyre blowout: grip the wheel with both hands and keep straight; don't brake hard; ease off the accelerator and let the car slow; hazard lights on; steer gently to a safe spot off the road; stand away from traffic; place the warning triangle (C-caution). At night use high beam only when no oncoming traffic; if a blowout happens in a dark/isolated spot, drive slowly on the flat to a lit, busy place. FRSC-listed items include spare tyre, jack, wheel spanner, C-caution, fire extinguisher, first aid kit. Cartoon character; not an official FRSC message."
+}
