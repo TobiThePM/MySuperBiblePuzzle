@@ -291,7 +291,8 @@ for c in cues:
     with np.errstate(divide="ignore"):
         r = 20 * np.log10(np.sqrt(np.mean(dia[:, a:b] ** 2)) / (np.sqrt(np.mean(bg[:, a:b] ** 2)) + 1e-9))
     c["snr_db"] = round(float(r), 1) if np.isfinite(r) else None
-peak = np.max(np.abs(mix)) + 1e-9
+# level from the dialogue, so one loud effect (the tyre burst) cannot push the whole mix down
+peak = np.percentile(np.abs(dia), 99.9) * 1.25 + 1e-9
 mix = np.tanh(mix / peak * 1.3) * 0.93
 pcm = (mix.T * 32767).astype(np.int16)
 with wave.open(os.path.join(WORK, "mix.wav"), "wb") as w:
